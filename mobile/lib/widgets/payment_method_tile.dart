@@ -3,7 +3,8 @@ import 'package:flutter/material.dart';
 import '../core/app_colors.dart';
 import '../core/app_text_styles.dart';
 
-enum PaymentMethod { qris, virtualAccount, cod }
+/// Nilai `payment_method` di API: `va` | `online` (Snap: QRIS, GoPay, ShopeePay).
+enum PaymentMethod { va, online }
 
 class PaymentMethodOption {
   final PaymentMethod method;

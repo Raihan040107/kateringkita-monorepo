@@ -8,9 +8,7 @@ import 'core/app_colors.dart';
 import 'core/app_router.dart';
 import 'core/app_routes.dart';
 import 'core/app_theme.dart';
-import 'data/app_database.dart';
 import 'data/token_store.dart';
-import 'providers/cart_provider.dart';
 import 'providers/session_provider.dart';
 import 'providers/theme_provider.dart';
 import 'services/api_client.dart';
@@ -64,11 +62,6 @@ void main() async {
         ),
         Provider<ApiClient>.value(value: api),
         ChangeNotifierProvider<SessionProvider>.value(value: session),
-        ChangeNotifierProvider(create: (_) => CartProvider()),
-        Provider<AppDb>(
-          create: (_) => AppDb(),
-          dispose: (_, db) => db.close(),
-        ),
       ],
       child: const KateringKitaApp(),
     ),

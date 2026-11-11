@@ -12,6 +12,7 @@ class AppRoutes {
   static const String storeProfile = '/store-profile';
   static const String checkout = '/checkout';
   static const String payment = '/payment';
+  static const String orderDetail = '/order-detail';
   static const String whatsappGenerator = '/whatsapp-generator';
   static const String aiAssistant = '/ai-assistant';
   static const String orders = '/orders';

@@ -90,7 +90,7 @@ class AppModalDialog extends StatelessWidget {
   /// 2. Modal Konfirmasi Proses Pembayaran di Checkout
   static Future<bool?> showPaymentConfirmation(
     BuildContext context, {
-    required double total,
+    required int total,
     required VoidCallback onConfirm,
   }) {
     return show<bool>(

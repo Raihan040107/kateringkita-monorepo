@@ -26,6 +26,12 @@ class AppTime {
   /// `12 Nov 2026, 14.05 WIB`
   static String dateTime(DateTime t) => '${date(t)}, ${wib(t)}';
 
+  /// `2026-11-12T14:05:00+07:00` dari jam dinding WIB yang dipilih pengguna
+  /// (tanpa melihat zona waktu perangkat).
+  static String isoWib(DateTime wib) =>
+      '${wib.year}-${_dd(wib.month)}-${_dd(wib.day)}'
+      'T${_dd(wib.hour)}:${_dd(wib.minute)}:00+07:00';
+
   /// `04:59`
   static String mmss(int seconds) {
     final s = seconds < 0 ? 0 : seconds;
