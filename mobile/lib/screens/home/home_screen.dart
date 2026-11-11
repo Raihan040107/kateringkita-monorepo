@@ -1,12 +1,20 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import '../../core/app_colors.dart';
 import '../../core/app_routes.dart';
 import '../../core/app_text_styles.dart';
-import '../../data/settings_store.dart';
-import '../../models/product_model.dart';
+import '../../models/menu.dart';
+import '../../models/meta.dart';
+import '../../providers/session_provider.dart';
+import '../../services/api_client.dart';
+import '../../services/auth_api.dart';
+import '../../services/catalog_api.dart';
+import '../../services/meta_api.dart';
 import '../../widgets/food_card.dart';
-import '../orders/location_picker_screen.dart';
+import '../orders/pickup_point_picker_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   final Function(int)? onTabChange;
@@ -18,140 +26,99 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  String _selectedCategory = 'Semua';
-  String _meetingPoint = SettingsStore.defaultMeetingPoint;
+  List<Category> _categories = const [];
+  List<PickupPoint> _pickupPoints = const [];
+  List<MenuCard> _menus = const [];
 
-  final List<String> _categories = [
-    'Semua',
-    '🥞 Martabak',
-    '🍗 Ayam',
-    '🥟 Snack',
-    '🍱 Paket',
-  ];
+  /// null = semua kategori
+  Category? _selectedCategory;
+  bool _loading = true;
+  String? _error;
 
-  int _currentBannerIndex = 0;
-  final PageController _bannerController = PageController();
-
-  static const List<Map<String, dynamic>> _promoBanners = [
-    {
-      'tag': 'SPECIAL PROMO',
-      'title': 'Summer Sale',
-      'subtitle': 'Diskon s/d 50% untuk Danusan',
-      'cta': 'Pesan Sekarang →',
-      'image': 'assets/images/banner_promo.png',
-      'productIndex': 1,
-    },
-    {
-      'tag': 'GRATIS ONGKIR',
-      'title': 'Antar Seluruh UB',
-      'subtitle': 'Bebas biaya kirim ke semua fakultas',
-      'cta': 'Klaim Promo →',
-      'image': 'assets/images/nasi_kuning.png',
-      'productIndex': 2,
-    },
-    {
-      'tag': 'PAKET DANUSAN',
-      'title': 'Paket Rapat Hemat',
-      'subtitle': 'Catering snack & makan siang organisasi',
-      'cta': 'Pilih Menu →',
-      'image': 'assets/images/lumpia_diego.png',
-      'productIndex': 0,
-    },
-  ];
+  ApiClient get _api => context.read<ApiClient>();
+  int? get _favoritePickupPointId =>
+      context.read<SessionProvider>().user?.favoritePickupPointId;
 
   @override
   void initState() {
     super.initState();
-    _loadMeetingPoint();
+    _loadAll();
   }
 
-  @override
-  void dispose() {
-    _bannerController.dispose();
-    super.dispose();
+  /// Kategori + titik temu, lalu menu.
+  Future<void> _loadAll() async {
+    try {
+      final (categories, pickupPoints) =
+          await (_api.categories(), _api.pickupPoints()).wait;
+      _categories = categories;
+      _pickupPoints = pickupPoints;
+    } on ParallelWaitError {
+      // chip kategori/titik temu kosong; menu tetap dimuat
+    }
+    await _loadMenus();
   }
 
-  Future<void> _loadMeetingPoint() async {
-    final point = await SettingsStore.loadMeetingPoint();
+  Future<void> _loadMenus() async {
     if (!mounted) return;
-    setState(() => _meetingPoint = point);
-  }
-
-  Future<void> _pickMeetingPoint() async {
-    final (lat, lng) = await SettingsStore.loadMeetingCoordinates();
-    if (!mounted) return;
-    final result = await Navigator.push<DeliveryLocation>(
-      context,
-      MaterialPageRoute(
-        builder: (context) => LocationPickerScreen(
-          currentLocationName: _meetingPoint,
-          initialLat: lat,
-          initialLng: lng,
-        ),
-      ),
-    );
-    if (result != null) {
-      await SettingsStore.saveMeetingPoint(
-        result.name,
-        fullAddress: result.fullAddress,
-        latitude: result.latitude,
-        longitude: result.longitude,
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final menus = await _api.menus(
+        category: _selectedCategory?.slug,
+        pickupPointId: _favoritePickupPointId,
       );
-      setState(() => _meetingPoint = result.name);
+      if (!mounted) return;
+      setState(() {
+        _menus = menus;
+        _loading = false;
+      });
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.message;
+        _loading = false;
+      });
     }
   }
 
-  List<ProductModel> get _filteredProducts {
-    switch (_selectedCategory) {
-      case '🥞 Martabak':
-        return ProductData.mockProducts
-            .where((p) =>
-                p.category == 'manis' &&
-                p.name.toLowerCase().contains('martabak'))
-            .toList();
-      case '🍗 Ayam':
-        return ProductData.mockProducts
-            .where((p) =>
-                p.name.toLowerCase().contains('ayam') ||
-                p.description.toLowerCase().contains('ayam'))
-            .toList();
-      case '🥟 Snack':
-        return ProductData.mockProducts
-            .where((p) =>
-                p.name.toLowerCase().contains('lumpia') ||
-                p.name.toLowerCase().contains('risoles') ||
-                p.name.toLowerCase().contains('donat'))
-            .toList();
-      case '🍱 Paket':
-        return ProductData.mockProducts
-            .where((p) =>
-                p.name.toLowerCase().contains('nasi') ||
-                p.category == 'katering' ||
-                p.category == 'danusan')
-            .toList();
-      case '🍩 Donat & Manis':
-        return ProductData.mockProducts
-            .where((p) => p.category == 'manis')
-            .toList();
-      case '🥤 Minuman':
-        return [];
-      case 'Semua':
-      default:
-        return ProductData.mockProducts;
+  void _selectCategory(Category? category) {
+    if (category?.id == _selectedCategory?.id) return;
+    _selectedCategory = category;
+    _loadMenus();
+  }
+
+  /// Titik temu favorit disimpan di server (`PATCH /me`), lalu katalog
+  /// disaring dengan `pickup_point_id`.
+  Future<void> _pickPickupPoint() async {
+    final session = context.read<SessionProvider>();
+    final picked = await Navigator.push<PickupPoint>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PickupPointPickerScreen(
+          selectedId: session.user?.favoritePickupPointId,
+          points: _pickupPoints.isEmpty ? null : _pickupPoints,
+        ),
+      ),
+    );
+    if (picked == null || !mounted) return;
+    try {
+      session.setUser(
+          await _api.updateMe({'favorite_pickup_point_id': picked.id}));
+      if (!_pickupPoints.any((p) => p.id == picked.id)) {
+        _pickupPoints = [..._pickupPoints, picked];
+      }
+      await _loadMenus();
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(e.message)));
     }
   }
 
   void _showCategoryFilterSheet() {
-    final filterOptions = [
-      {'label': 'Semua Menu', 'cat': 'Semua', 'icon': Icons.restaurant_menu_rounded},
-      {'label': '🥞 Martabak Manis', 'cat': '🥞 Martabak', 'icon': Icons.cake_rounded},
-      {'label': '🍗 Ayam & Lauk', 'cat': '🍗 Ayam', 'icon': Icons.lunch_dining_rounded},
-      {'label': '🥟 Snack & Gorengan', 'cat': '🥟 Snack', 'icon': Icons.bakery_dining_rounded},
-      {'label': '🍱 Paket Danus & Katering', 'cat': '🍱 Paket', 'icon': Icons.inventory_2_rounded},
-      {'label': '🍩 Donat & Manis', 'cat': '🍩 Donat & Manis', 'icon': Icons.cookie_rounded},
-      {'label': '🥤 Minuman Dingin', 'cat': '🥤 Minuman', 'icon': Icons.local_drink_rounded},
-    ];
-
+    final items = <Category?>[null, ..._categories];
     showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(
@@ -183,31 +150,37 @@ class _HomeScreenState extends State<HomeScreen> {
                 Flexible(
                   child: ListView.separated(
                     shrinkWrap: true,
-                    itemCount: filterOptions.length,
-                    separatorBuilder: (context, index) => const Divider(height: 1),
+                    itemCount: items.length,
+                    separatorBuilder: (_, _) => const Divider(height: 1),
                     itemBuilder: (context, index) {
-                      final item = filterOptions[index];
-                      final isSelected = _selectedCategory == item['cat'];
+                      final item = items[index];
+                      final isSelected = item?.id == _selectedCategory?.id;
                       return ListTile(
                         leading: Icon(
-                          item['icon'] as IconData,
-                          color: isSelected ? AppColors.primary : AppColors.textSecondary,
+                          item == null
+                              ? Icons.restaurant_menu_rounded
+                              : Icons.label_rounded,
+                          color: isSelected
+                              ? AppColors.primary
+                              : AppColors.textSecondary,
                         ),
                         title: Text(
-                          item['label'] as String,
+                          item?.name ?? 'Semua Menu',
                           style: AppTextStyles.bodyMedium.copyWith(
-                            fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
-                            color: isSelected ? AppColors.primary : AppColors.textPrimary,
+                            fontWeight:
+                                isSelected ? FontWeight.w700 : FontWeight.w500,
+                            color: isSelected
+                                ? AppColors.primary
+                                : AppColors.textPrimary,
                           ),
                         ),
                         trailing: isSelected
-                            ? const Icon(Icons.check_circle_rounded, color: AppColors.primary)
+                            ? const Icon(Icons.check_circle_rounded,
+                                color: AppColors.primary)
                             : null,
                         onTap: () {
-                          setState(() {
-                            _selectedCategory = item['cat'] as String;
-                          });
                           Navigator.pop(context);
+                          _selectCategory(item);
                         },
                       );
                     },
@@ -223,362 +196,54 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final products = _filteredProducts;
+    final favoriteId =
+        context.watch<SessionProvider>().user?.favoritePickupPointId;
+    final pickupName =
+        _pickupPoints.where((p) => p.id == favoriteId).firstOrNull?.name;
+    final hasCategory = _selectedCategory != null;
 
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
         bottom: false,
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(20, 12, 20, 100),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // ---------------- TOP BAR (FIGMA) ----------------
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'KateringKita',
-                          style: AppTextStyles.h2.copyWith(
-                            fontSize: 22,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        GestureDetector(
-                          onTap: _pickMeetingPoint,
-                          child: Row(
-                            children: [
-                              const Icon(Icons.location_on, size: 14, color: AppColors.primary),
-                              const SizedBox(width: 4),
-                              Flexible(
-                                child: Text(
-                                  '$_meetingPoint ▾',
-                                  overflow: TextOverflow.ellipsis,
-                                  style: AppTextStyles.bodySmall.copyWith(
-                                    color: AppColors.textSecondary,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  // Notification icon with badge dot
-                  GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: () {
-                      Navigator.pushNamed(context, AppRoutes.notifications);
-                    },
-                    child: Stack(
-                      children: [
-                        Container(
-                          width: 44,
-                          height: 44,
-                          decoration: BoxDecoration(
-                            color: AppColors.surface,
-                            shape: BoxShape.circle,
-                            border: Border.all(color: AppColors.cardBorder.withValues(alpha: 0.8)),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withValues(alpha: 0.04),
-                                blurRadius: 8,
-                                offset: const Offset(0, 2),
-                              ),
-                            ],
-                          ),
-                          child: Icon(
-                            Icons.notifications_outlined,
-                            color: AppColors.textPrimary,
-                            size: 22,
-                          ),
-                        ),
-                        Positioned(
-                          top: 10,
-                          right: 12,
-                          child: Container(
-                            width: 8,
-                            height: 8,
-                            decoration: const BoxDecoration(
-                              color: AppColors.danger,
-                              shape: BoxShape.circle,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 20),
-
-              // ---------------- SEARCH BAR (FIGMA) ----------------
-              Container(
-                height: 48,
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                decoration: BoxDecoration(
-                  color: AppColors.surface,
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: AppColors.cardBorder),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.02),
-                      blurRadius: 6,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
-                ),
-                child: Row(
+        child: RefreshIndicator(
+          onRefresh: _loadAll,
+          child: SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 100),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // ---------------- TOP BAR ----------------
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Icon(Icons.search, color: AppColors.textMuted, size: 20),
-                    const SizedBox(width: 12),
                     Expanded(
-                      child: GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onTap: () {
-                          Navigator.pushNamed(context, AppRoutes.search);
-                        },
-                        child: Text(
-                          _selectedCategory == 'Semua'
-                              ? 'Search products, katering, danus...'
-                              : 'Kategori: $_selectedCategory',
-                          style: AppTextStyles.bodyMedium.copyWith(
-                            color: _selectedCategory == 'Semua'
-                                ? AppColors.textMuted
-                                : AppColors.primary,
-                            fontSize: 13,
-                            fontWeight: _selectedCategory == 'Semua'
-                                ? FontWeight.w400
-                                : FontWeight.w600,
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ),
-                    if (_selectedCategory != 'Semua')
-                      GestureDetector(
-                        onTap: () => setState(() => _selectedCategory = 'Semua'),
-                        child: Padding(
-                          padding: const EdgeInsets.only(right: 8),
-                          child: Icon(Icons.close_rounded, color: AppColors.textMuted, size: 18),
-                        ),
-                      ),
-                    // Tombol Kategori Tune Icon
-                    GestureDetector(
-                      onTap: _showCategoryFilterSheet,
-                      child: Container(
-                        padding: const EdgeInsets.all(4),
-                        decoration: BoxDecoration(
-                          color: _selectedCategory != 'Semua'
-                              ? AppColors.primarySoft
-                              : Colors.transparent,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Icon(
-                          Icons.tune_rounded,
-                          color: _selectedCategory != 'Semua'
-                              ? AppColors.primary
-                              : AppColors.textPrimary,
-                          size: 18,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 18),
-
-              // ---------------- CATEGORY PILLS (FIGMA) ----------------
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: List.generate(_categories.length, (index) {
-                    final category = _categories[index];
-                    final isSelected = _selectedCategory == category;
-                    return Padding(
-                      padding: const EdgeInsets.only(right: 10),
-                      child: GestureDetector(
-                        onTap: () {
-                          setState(() {
-                            // Jika klik kategori yang sama, toggle kembali ke 'Semua'
-                            if (isSelected && category != 'Semua') {
-                              _selectedCategory = 'Semua';
-                            } else {
-                              _selectedCategory = category;
-                            }
-                          });
-                        },
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 200),
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                          decoration: BoxDecoration(
-                            color: isSelected ? AppColors.primary : AppColors.surface,
-                            borderRadius: BorderRadius.circular(20),
-                            border: Border.all(
-                              color: isSelected ? AppColors.primary : AppColors.cardBorder,
-                            ),
-                            boxShadow: isSelected
-                                ? [
-                                    BoxShadow(
-                                      color: AppColors.primary.withValues(alpha: 0.3),
-                                      blurRadius: 8,
-                                      offset: const Offset(0, 3),
-                                    ),
-                                  ]
-                                : null,
-                          ),
-                          child: Text(
-                            category,
-                            style: AppTextStyles.bodyMedium.copyWith(
-                              color: isSelected ? Colors.white : AppColors.textPrimary,
-                              fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
-                              fontSize: 13,
-                            ),
-                          ),
-                        ),
-                      ),
-                    );
-                  }),
-                ),
-              ),
-              const SizedBox(height: 20),
-
-              // ---------------- PROMO BANNER CAROUSEL (FIGMA) ----------------
-              SizedBox(
-                width: double.infinity,
-                height: 172,
-                child: PageView.builder(
-                  controller: _bannerController,
-                  itemCount: _promoBanners.length,
-                  onPageChanged: (index) {
-                    setState(() => _currentBannerIndex = index);
-                  },
-                  itemBuilder: (context, index) {
-                    final banner = _promoBanners[index];
-                    final targetProduct = ProductData.mockProducts[banner['productIndex'] as int];
-
-                    return Container(
-                      margin: const EdgeInsets.symmetric(horizontal: 2),
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(20),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.1),
-                            blurRadius: 16,
-                            offset: const Offset(0, 6),
-                          ),
-                        ],
-                      ),
-                      child: Stack(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // Background Image
-                          Positioned.fill(
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(20),
-                              child: Image.asset(
-                                banner['image'] as String,
-                                fit: BoxFit.cover,
-                                errorBuilder: (context, error, stackTrace) => Container(
-                                  color: AppColors.primary,
-                                ),
-                              ),
+                          Text(
+                            'KateringKita',
+                            style: AppTextStyles.h2.copyWith(
+                              fontSize: 22,
+                              fontWeight: FontWeight.w800,
                             ),
                           ),
-                          // Dark/Orange Gradient Overlay
-                          Positioned.fill(
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(20),
-                              child: Container(
-                                decoration: BoxDecoration(
-                                  gradient: LinearGradient(
-                                    begin: Alignment.centerLeft,
-                                    end: Alignment.centerRight,
-                                    colors: [
-                                      const Color(0xFF1A130D).withValues(alpha: 0.92),
-                                      const Color(0xFF1A130D).withValues(alpha: 0.65),
-                                      Colors.transparent,
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                          // Banner Content
-                          Padding(
-                            padding: const EdgeInsets.fromLTRB(18, 14, 18, 14),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              mainAxisAlignment: MainAxisAlignment.center,
+                          const SizedBox(height: 2),
+                          GestureDetector(
+                            onTap: _pickPickupPoint,
+                            child: Row(
                               children: [
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                  decoration: BoxDecoration(
-                                    color: AppColors.primary,
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
+                                const Icon(Icons.location_on,
+                                    size: 14, color: AppColors.primary),
+                                const SizedBox(width: 4),
+                                Flexible(
                                   child: Text(
-                                    banner['tag'] as String,
-                                    style: AppTextStyles.badge.copyWith(
-                                      color: Colors.white,
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.w800,
-                                      letterSpacing: 0.5,
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(height: 8),
-                                Text(
-                                  banner['title'] as String,
-                                  style: AppTextStyles.h2.copyWith(
-                                    color: Colors.white,
-                                    fontSize: 22,
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  banner['subtitle'] as String,
-                                  style: AppTextStyles.bodySmall.copyWith(
-                                    color: const Color(0xFFFEF3C7),
-                                    fontWeight: FontWeight.w500,
-                                    fontSize: 12,
-                                  ),
-                                ),
-                                const SizedBox(height: 12),
-                                GestureDetector(
-                                  onTap: () {
-                                    Navigator.pushNamed(
-                                      context,
-                                      AppRoutes.productDetail,
-                                      arguments: targetProduct,
-                                    );
-                                  },
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                                    decoration: BoxDecoration(
-                                      color: Colors.white,
-                                      borderRadius: BorderRadius.circular(16),
-                                    ),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Text(
-                                          banner['cta'] as String,
-                                          style: AppTextStyles.bodySmall.copyWith(
-                                            color: AppColors.primary,
-                                            fontWeight: FontWeight.w700,
-                                            fontSize: 11,
-                                          ),
-                                        ),
-                                      ],
+                                    '${pickupName ?? 'Pilih titik temu'} ▾',
+                                    overflow: TextOverflow.ellipsis,
+                                    style: AppTextStyles.bodySmall.copyWith(
+                                      color: AppColors.textSecondary,
+                                      fontWeight: FontWeight.w500,
                                     ),
                                   ),
                                 ),
@@ -587,103 +252,300 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                         ],
                       ),
-                    );
-                  },
-                ),
-              ),
-              const SizedBox(height: 10),
-              // Dots Indicator
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: List.generate(_promoBanners.length, (index) {
-                  final isSelected = _currentBannerIndex == index;
-                  return AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
-                    margin: const EdgeInsets.symmetric(horizontal: 3),
-                    width: isSelected ? 20 : 6,
-                    height: 6,
-                    decoration: BoxDecoration(
-                      color: isSelected ? AppColors.primary : AppColors.cardBorder,
-                      borderRadius: BorderRadius.circular(3),
                     ),
-                  );
-                }),
-              ),
-              const SizedBox(height: 18),
-
-              // ---------------- DAFTAR MENU HEADER ----------------
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    _selectedCategory == 'Semua'
-                        ? 'Daftar Menu (${products.length})'
-                        : '$_selectedCategory (${products.length})',
-                    style: AppTextStyles.h3.copyWith(
-                      fontSize: 17,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                  Text(
-                    'Semua halal & higienis',
-                    style: AppTextStyles.bodySmall.copyWith(
-                      color: AppColors.textMuted,
-                      fontSize: 11,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 14),
-
-              // ---------------- PRODUCT GRID (FIGMA) ----------------
-              if (products.isEmpty)
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(vertical: 40),
-                  child: Column(
-                    children: [
-                      Icon(Icons.search_off_rounded, size: 48, color: AppColors.textMuted),
-                      const SizedBox(height: 12),
-                      Text(
-                        'Tidak ada menu dalam kategori ini',
-                        style: AppTextStyles.h4.copyWith(fontSize: 14),
+                    // Lonceng notifikasi (badge belum dibaca menyusul di Fase 4)
+                    GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () {
+                        Navigator.pushNamed(context, AppRoutes.notifications);
+                      },
+                      child: Container(
+                        width: 44,
+                        height: 44,
+                        decoration: BoxDecoration(
+                          color: AppColors.surface,
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                              color: AppColors.cardBorder.withValues(alpha: 0.8)),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.04),
+                              blurRadius: 8,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
+                        ),
+                        child: Icon(
+                          Icons.notifications_outlined,
+                          color: AppColors.textPrimary,
+                          size: 22,
+                        ),
                       ),
-                      const SizedBox(height: 6),
-                      TextButton(
-                        onPressed: () => setState(() => _selectedCategory = 'Semua'),
-                        child: const Text('Tampilkan Semua Menu'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+
+                // ---------------- FILTER BAR ----------------
+                // Pencarian teks ditunda; bilah ini membuka pilihan kategori.
+                Container(
+                  height: 48,
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  decoration: BoxDecoration(
+                    color: AppColors.surface,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: AppColors.cardBorder),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.02),
+                        blurRadius: 6,
+                        offset: const Offset(0, 2),
                       ),
                     ],
                   ),
-                )
-              else
-                GridView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  itemCount: products.length,
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 2,
-                    childAspectRatio: 0.76,
-                    crossAxisSpacing: 14,
-                    mainAxisSpacing: 16,
+                  child: Row(
+                    children: [
+                      Icon(Icons.search, color: AppColors.textMuted, size: 20),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: _showCategoryFilterSheet,
+                          child: Text(
+                            hasCategory
+                                ? 'Kategori: ${_selectedCategory!.name}'
+                                : 'Pilih kategori menu...',
+                            style: AppTextStyles.bodyMedium.copyWith(
+                              color: hasCategory
+                                  ? AppColors.primary
+                                  : AppColors.textMuted,
+                              fontSize: 13,
+                              fontWeight: hasCategory
+                                  ? FontWeight.w600
+                                  : FontWeight.w400,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ),
+                      if (hasCategory)
+                        GestureDetector(
+                          onTap: () => _selectCategory(null),
+                          child: Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: Icon(Icons.close_rounded,
+                                color: AppColors.textMuted, size: 18),
+                          ),
+                        ),
+                      GestureDetector(
+                        onTap: _showCategoryFilterSheet,
+                        child: Container(
+                          padding: const EdgeInsets.all(4),
+                          decoration: BoxDecoration(
+                            color: hasCategory
+                                ? AppColors.primarySoft
+                                : Colors.transparent,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Icon(
+                            Icons.tune_rounded,
+                            color: hasCategory
+                                ? AppColors.primary
+                                : AppColors.textPrimary,
+                            size: 18,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                  itemBuilder: (context, index) {
-                    final product = products[index];
-                    return FoodGridCard(
-                      product: product,
-                      onTap: () {
-                        Navigator.pushNamed(
-                          context,
-                          AppRoutes.productDetail,
-                          arguments: product,
-                        );
-                      },
-                    );
-                  },
                 ),
-            ],
+                const SizedBox(height: 18),
+
+                // ---------------- CATEGORY PILLS ----------------
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      for (final category in <Category?>[null, ..._categories])
+                        Padding(
+                          padding: const EdgeInsets.only(right: 10),
+                          child: _CategoryChip(
+                            label: category?.name ?? 'Semua',
+                            selected: category?.id == _selectedCategory?.id,
+                            onTap: () => _selectCategory(
+                              // klik kategori yang sama → kembali ke Semua
+                              category?.id == _selectedCategory?.id
+                                  ? null
+                                  : category,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 20),
+
+                // ---------------- DAFTAR MENU HEADER ----------------
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      '${_selectedCategory?.name ?? 'Daftar Menu'} (${_menus.length})',
+                      style: AppTextStyles.h3.copyWith(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    Text(
+                      'Semua halal & higienis',
+                      style: AppTextStyles.bodySmall.copyWith(
+                        color: AppColors.textMuted,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+
+                // ---------------- PRODUCT GRID ----------------
+                if (_loading)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 60),
+                    child: Center(child: CircularProgressIndicator()),
+                  )
+                else if (_error != null)
+                  _Message(
+                    icon: Icons.wifi_off_rounded,
+                    text: _error!,
+                    action: 'Coba lagi',
+                    onAction: _loadMenus,
+                  )
+                else if (_menus.isEmpty)
+                  _Message(
+                    icon: Icons.storefront_outlined,
+                    text: 'Belum ada menu buka saat ini',
+                    action: hasCategory
+                        ? 'Tampilkan Semua Menu'
+                        : favoriteId != null
+                            ? 'Ganti titik temu'
+                            : null,
+                    onAction: hasCategory
+                        ? () => _selectCategory(null)
+                        : _pickPickupPoint,
+                  )
+                else
+                  GridView.builder(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    itemCount: _menus.length,
+                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 2,
+                      childAspectRatio: 0.76,
+                      crossAxisSpacing: 14,
+                      mainAxisSpacing: 16,
+                    ),
+                    itemBuilder: (context, index) {
+                      final menu = _menus[index];
+                      return FoodGridCard(
+                        menu: menu,
+                        onTap: () {
+                          Navigator.pushNamed(
+                            context,
+                            AppRoutes.productDetail,
+                            arguments: menu.id,
+                          );
+                        },
+                      );
+                    },
+                  ),
+              ],
+            ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _CategoryChip extends StatelessWidget {
+  const _CategoryChip({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        decoration: BoxDecoration(
+          color: selected ? AppColors.primary : AppColors.surface,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: selected ? AppColors.primary : AppColors.cardBorder,
+          ),
+          boxShadow: selected
+              ? [
+                  BoxShadow(
+                    color: AppColors.primary.withValues(alpha: 0.3),
+                    blurRadius: 8,
+                    offset: const Offset(0, 3),
+                  ),
+                ]
+              : null,
+        ),
+        child: Text(
+          label,
+          style: AppTextStyles.bodyMedium.copyWith(
+            color: selected ? Colors.white : AppColors.textPrimary,
+            fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+            fontSize: 13,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _Message extends StatelessWidget {
+  const _Message({
+    required this.icon,
+    required this.text,
+    this.action,
+    this.onAction,
+  });
+
+  final IconData icon;
+  final String text;
+  final String? action;
+  final VoidCallback? onAction;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 40),
+      child: Column(
+        children: [
+          Icon(icon, size: 48, color: AppColors.textMuted),
+          const SizedBox(height: 12),
+          Text(
+            text,
+            textAlign: TextAlign.center,
+            style: AppTextStyles.h4.copyWith(fontSize: 14),
+          ),
+          if (action != null) ...[
+            const SizedBox(height: 6),
+            TextButton(onPressed: onAction, child: Text(action!)),
+          ],
+        ],
       ),
     );
   }

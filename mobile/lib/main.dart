@@ -9,7 +9,6 @@ import 'core/app_router.dart';
 import 'core/app_routes.dart';
 import 'core/app_theme.dart';
 import 'data/app_database.dart';
-import 'data/liked_store.dart';
 import 'data/token_store.dart';
 import 'providers/cart_provider.dart';
 import 'providers/session_provider.dart';
@@ -23,7 +22,6 @@ final scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await LikedStore.init();
 
   final prefs = SharedPreferencesAsync();
   final isDarkInitial = await prefs.getBool(ThemeProvider.prefKey) ?? false;

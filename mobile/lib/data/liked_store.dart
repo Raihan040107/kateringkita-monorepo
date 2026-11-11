@@ -1,62 +1,48 @@
 import 'package:flutter/foundation.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
-/// Local storage untuk menyimpan produk yang disukai (favorit/liked)
-/// menggunakan SharedPreferences.
+import '../models/menu.dart';
+import '../services/api_client.dart';
+import '../services/catalog_api.dart';
+
+/// Menu favorit pembeli, disinkronkan dengan `GET/PUT/DELETE /me/favorites`.
+/// Perubahan optimistik: daftar diperbarui dulu, dikembalikan bila server menolak.
 class LikedStore {
-  static final _prefs = SharedPreferencesAsync();
-  static const _likedKey = 'liked_products_list';
-  static const _seededKey = 'liked_products_seeded';
+  LikedStore._();
 
-  // Default produk yang disukai saat pertama kali aplikasi dibuka
-  static const List<String> defaultLikedIds = [
-    'prod-001', // Lumpia Diego
-    'prod-002', // Martabak Manis
-    'prod-004', // Donat Surgawi
-    'prod-005', // Risoles Bu Tima
-  ];
+  static final ValueNotifier<List<MenuCard>> favorites =
+      ValueNotifier<List<MenuCard>>(const []);
 
-  static final ValueNotifier<Set<String>> likedNotifier =
-      ValueNotifier<Set<String>>(defaultLikedIds.toSet());
-
-  static bool _initialized = false;
-
-  static Future<void> init() async {
-    if (_initialized) return;
+  static Future<void> load(ApiClient api) async {
     try {
-      final isSeeded = await _prefs.getBool(_seededKey) ?? false;
-      if (isSeeded) {
-        final list = await _prefs.getStringList(_likedKey);
-        likedNotifier.value = (list ?? []).toSet();
-      } else {
-        await _prefs.setStringList(_likedKey, defaultLikedIds);
-        await _prefs.setBool(_seededKey, true);
-        likedNotifier.value = defaultLikedIds.toSet();
-      }
+      favorites.value = await api.favorites();
     } catch (_) {
-      likedNotifier.value = defaultLikedIds.toSet();
+      // dibiarkan kosong; dimuat ulang saat layar Liked dibuka
     }
-    _initialized = true;
   }
 
-  static bool isLiked(String productId) {
-    return likedNotifier.value.contains(productId);
-  }
+  static bool isLiked(int menuId) =>
+      favorites.value.any((m) => m.id == menuId);
 
-  static Future<bool> toggleLike(String productId) async {
-    await init();
-    final current = Set<String>.from(likedNotifier.value);
-    final nowLiked = !current.contains(productId);
-
-    if (nowLiked) {
-      current.add(productId);
-    } else {
-      current.remove(productId);
+  /// Mengembalikan status baru (true = jadi favorit). Melempar [ApiException]
+  /// bila server menolak; daftar sudah dikembalikan ke semula.
+  static Future<bool> toggle(ApiClient api, MenuCard menu) async {
+    final before = favorites.value;
+    final wasLiked = isLiked(menu.id);
+    favorites.value = wasLiked
+        ? before.where((m) => m.id != menu.id).toList()
+        : [menu.copyWith(isFavorite: true), ...before];
+    try {
+      if (wasLiked) {
+        await api.removeFavorite(menu.id);
+      } else {
+        await api.addFavorite(menu.id);
+      }
+    } on ApiException {
+      favorites.value = before;
+      rethrow;
     }
-
-    likedNotifier.value = current;
-    await _prefs.setBool(_seededKey, true);
-    await _prefs.setStringList(_likedKey, current.toList());
-    return nowLiked;
+    return !wasLiked;
   }
+
+  static void clear() => favorites.value = const [];
 }

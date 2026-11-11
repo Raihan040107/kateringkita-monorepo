@@ -12,6 +12,7 @@ class MenuImage extends StatelessWidget {
     this.fit = BoxFit.cover,
     this.radius = 0,
     this.iconSize = 32,
+    this.icon = Icons.fastfood_rounded,
   });
 
   final String? url;
@@ -20,6 +21,7 @@ class MenuImage extends StatelessWidget {
   final BoxFit fit;
   final double radius;
   final double iconSize;
+  final IconData icon;
 
   @override
   Widget build(BuildContext context) {
@@ -28,7 +30,7 @@ class MenuImage extends StatelessWidget {
       height: height,
       color: AppColors.secondaryBg,
       alignment: Alignment.center,
-      child: Icon(Icons.fastfood_rounded, size: iconSize, color: AppColors.textMuted),
+      child: Icon(icon, size: iconSize, color: AppColors.textMuted),
     );
     final child = (url == null || url!.isEmpty)
         ? placeholder

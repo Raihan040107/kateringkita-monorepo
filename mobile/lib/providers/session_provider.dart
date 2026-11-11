@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
+import '../data/liked_store.dart';
 import '../data/token_store.dart';
 import '../models/user.dart';
 import '../services/api_client.dart';
@@ -30,6 +33,7 @@ class SessionProvider extends ChangeNotifier {
     try {
       _user = await _api.me();
       notifyListeners();
+      unawaited(LikedStore.load(_api));
       return true;
     } on ApiException catch (e) {
       if (e.status == 401) await clearToken();
@@ -41,6 +45,7 @@ class SessionProvider extends ChangeNotifier {
     await saveToken(token);
     _user = user;
     notifyListeners();
+    unawaited(LikedStore.load(_api));
   }
 
   void setUser(PublicUser user) {
@@ -50,6 +55,7 @@ class SessionProvider extends ChangeNotifier {
 
   /// Dipanggil saat token ditolak server (401) atau keluar.
   void clear() {
+    LikedStore.clear();
     if (_user == null) return;
     _user = null;
     notifyListeners();

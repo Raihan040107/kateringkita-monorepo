@@ -1,22 +1,76 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+
 import '../core/app_colors.dart';
 import '../core/app_currency.dart';
-import '../core/app_routes.dart';
 import '../core/app_text_styles.dart';
-import '../models/product_model.dart';
+import '../data/liked_store.dart';
+import '../models/menu.dart';
+import '../services/api_client.dart';
+import 'menu_image.dart';
+
+/// Label badge katalog: (teks, warna) atau null bila tersedia normal.
+(String, Color)? menuBadge(MenuCard menu) => switch (menu.badge) {
+      'sold_out' => ('Habis', AppColors.danger),
+      'low_stock' => ('Sisa ${menu.available}', AppColors.success),
+      'preorder' => ('Pre-order', AppColors.blue),
+      _ => null,
+    };
+
+/// Tombol hati yang terhubung ke [LikedStore]; dipakai kartu dan detail menu.
+class FavoriteButton extends StatelessWidget {
+  const FavoriteButton(this.menu, {super.key, this.size = 18});
+  final MenuCard menu;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<List<MenuCard>>(
+      valueListenable: LikedStore.favorites,
+      builder: (context, _, _) {
+        final liked = LikedStore.isLiked(menu.id);
+        return IconButton(
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(),
+          icon: Icon(
+            liked ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+            size: size,
+            color: liked ? AppColors.danger : AppColors.textPrimary,
+          ),
+          onPressed: () async {
+            final messenger = ScaffoldMessenger.of(context);
+            try {
+              final nowLiked =
+                  await LikedStore.toggle(context.read<ApiClient>(), menu);
+              messenger.showSnackBar(SnackBar(
+                content: Text(nowLiked
+                    ? 'Ditambahkan ke favorit: ${menu.name}'
+                    : 'Dihapus dari favorit: ${menu.name}'),
+                duration: const Duration(seconds: 1),
+              ));
+            } on ApiException catch (e) {
+              messenger.showSnackBar(SnackBar(content: Text(e.message)));
+            }
+          },
+        );
+      },
+    );
+  }
+}
 
 class FoodGridCard extends StatelessWidget {
-  final ProductModel product;
+  final MenuCard menu;
   final VoidCallback onTap;
 
   const FoodGridCard({
     super.key,
-    required this.product,
+    required this.menu,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
+    final badge = menuBadge(menu);
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -35,36 +89,24 @@ class FoodGridCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Image and badge
+            // Foto, badge, hati
             Expanded(
               child: Stack(
                 children: [
                   Positioned.fill(
                     child: ClipRRect(
                       borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
-                      child: Image.asset(
-                        product.image,
-                        width: double.infinity,
-                        height: double.infinity,
-                        fit: BoxFit.cover,
-                        alignment: Alignment.center,
-                        errorBuilder: (context, error, stackTrace) => Container(
-                          color: AppColors.secondaryBg,
-                          child: Icon(Icons.fastfood, color: AppColors.textMuted),
-                        ),
-                      ),
+                      child: MenuImage(menu.imageUrl),
                     ),
                   ),
-                  if (product.badgeText != null)
+                  if (badge != null)
                     Positioned(
                       top: 8,
                       left: 8,
                       child: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                         decoration: BoxDecoration(
-                          color: product.badgeType == 'quota'
-                              ? AppColors.success
-                              : AppColors.blue,
+                          color: badge.$2,
                           borderRadius: BorderRadius.circular(8),
                           boxShadow: [
                             BoxShadow(
@@ -74,7 +116,7 @@ class FoodGridCard extends StatelessWidget {
                           ],
                         ),
                         child: Text(
-                          product.badgeText!,
+                          badge.$1,
                           style: AppTextStyles.badge.copyWith(
                             color: Colors.white,
                             fontSize: 10,
@@ -82,6 +124,19 @@ class FoodGridCard extends StatelessWidget {
                         ),
                       ),
                     ),
+                  Positioned(
+                    top: 6,
+                    right: 6,
+                    child: Container(
+                      width: 30,
+                      height: 30,
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.9),
+                        shape: BoxShape.circle,
+                      ),
+                      child: FavoriteButton(menu, size: 16),
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -93,7 +148,7 @@ class FoodGridCard extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    product.name,
+                    menu.name,
                     style: AppTextStyles.h4.copyWith(
                       fontSize: 13,
                       fontWeight: FontWeight.w700,
@@ -102,42 +157,27 @@ class FoodGridCard extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                   ),
                   const SizedBox(height: 3),
-                  GestureDetector(
-                    onTap: () {
-                      Navigator.pushNamed(
-                        context,
-                        AppRoutes.storeProfile,
-                        arguments: product.vendor,
-                      );
-                    },
-                    behavior: HitTestBehavior.opaque,
-                    child: Row(
-                      children: [
-                        const Icon(
-                          Icons.storefront_rounded,
-                          size: 11.5,
-                          color: AppColors.primary,
-                        ),
-                        const SizedBox(width: 4),
-                        Expanded(
-                          child: Text(
-                            product.vendor,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: AppTextStyles.bodySmall.copyWith(
-                              fontSize: 10.5,
-                              fontWeight: FontWeight.w600,
-                              color: AppColors.textSecondary,
-                            ),
+                  Row(
+                    children: [
+                      const Icon(
+                        Icons.storefront_rounded,
+                        size: 11.5,
+                        color: AppColors.primary,
+                      ),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text(
+                          menu.merchant.businessName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppTextStyles.bodySmall.copyWith(
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.textSecondary,
                           ),
                         ),
-                        Icon(
-                          Icons.chevron_right_rounded,
-                          size: 13,
-                          color: AppColors.textMuted,
-                        ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 4),
                   Row(
@@ -146,7 +186,7 @@ class FoodGridCard extends StatelessWidget {
                     children: [
                       Flexible(
                         child: Text(
-                          AppCurrency.format(product.price),
+                          AppCurrency.format(menu.price),
                           style: AppTextStyles.price.copyWith(
                             fontSize: 13,
                             fontWeight: FontWeight.w800,
@@ -162,7 +202,9 @@ class FoodGridCard extends StatelessWidget {
                           const Icon(Icons.star_rounded, color: AppColors.warning, size: 14),
                           const SizedBox(width: 2),
                           Text(
-                            product.rating.toStringAsFixed(1),
+                            menu.ratingCount == 0
+                                ? 'Baru'
+                                : menu.ratingAvg.toStringAsFixed(1),
                             style: AppTextStyles.bodySmall.copyWith(
                               fontSize: 11,
                               fontWeight: FontWeight.w700,
