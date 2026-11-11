@@ -91,7 +91,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
       'low_stock' =>
         '🔥 Hanya tersisa ${c.available} ${c.unitLabel} untuk kuota hari ini!',
       'preorder' =>
-        'Pre-order: waktu ambil dipilih saat checkout (maks. H+${d.preorderDays}).',
+        'Pre-order: pilih waktu ambil saat checkout, paling cepat H+${d.preorderDays}.',
       _ => 'Tersedia ${c.available} ${c.unitLabel} untuk hari ini.',
     };
   }

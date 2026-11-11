@@ -223,17 +223,25 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   }
 
   Future<void> _pickPickupAt() async {
+    // Aturan server: waktu ambil di masa depan, paling lambat 7 hari; menu
+    // pre-order paling cepat H+preorder_days (hitung per tanggal WIB).
     final now = DateTime.now();
-    final days = (_menu?.preorderDays ?? 0) > 0 ? _menu!.preorderDays : 30;
+    final today = DateTime(now.year, now.month, now.day);
+    final lead = (_menu?.isPreorder ?? false) ? _menu!.preorderDays : 0;
+    final first = today.add(Duration(days: lead));
+    final lastCandidate = now.add(const Duration(days: 7));
+    final last = lastCandidate.isBefore(first) ? first : lastCandidate;
     final current = _pickupAt;
-    final initial = current != null && !current.isBefore(now)
+    final initial = current != null && !current.isBefore(first)
         ? current
-        : now.add(const Duration(days: 1));
+        : first.isAfter(now)
+            ? first
+            : today.add(const Duration(days: 1));
     final date = await showDatePicker(
       context: context,
-      initialDate: initial,
-      firstDate: now,
-      lastDate: now.add(Duration(days: days < 1 ? 1 : days)),
+      initialDate: initial.isAfter(last) ? last : initial,
+      firstDate: first,
+      lastDate: last,
     );
     if (date == null || !mounted) return;
     final time = await showTimePicker(
