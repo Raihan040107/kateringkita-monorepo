@@ -5,9 +5,7 @@ import 'package:provider/provider.dart';
 import '../../core/app_colors.dart';
 import '../../core/app_routes.dart';
 import '../../core/app_text_styles.dart';
-import '../../data/app_database.dart';
-import '../../data/auth_repository.dart';
-import '../../data/token_store.dart';
+import '../../services/api_client.dart';
 import '../../widgets/app_modal_dialog.dart';
 import '../../widgets/auth_scaffold.dart';
 import '../../widgets/custom_text_field.dart';
@@ -77,19 +75,27 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
 
     setState(() => _isLoading = true);
 
-    // Ambil email dari arguments rute (atau sesi tersimpan/default)
+    // Email + kode OTP dari rute verifikasi: {'email', 'code'}
     final args = ModalRoute.of(context)?.settings.arguments;
-    final email = (args is String && args.isNotEmpty)
-        ? args.trim()
-        : (await TokenStore.readSessionEmail() ?? 'abdurrahim@student.ub.ac.id');
+    final email = args is Map
+        ? '${args['email'] ?? ''}'
+        : (args is String ? args.trim() : '');
+    final code = args is Map ? '${args['code'] ?? ''}' : '';
 
-    // Simpan password baru ke Drift SQLite & Secure Storage
-    if (!mounted) return;
-    final repo = AuthRepository(context.read<AppDb>());
-    await repo.resetPassword(
-      email: email,
-      newPassword: _newController.text,
-    );
+    try {
+      await context.read<ApiClient>().post('/auth/password/reset', body: {
+        'email': email,
+        'code': code,
+        'password': _newController.text,
+      });
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _newError = e.field('password') ?? e.message;
+      });
+      return;
+    }
 
     if (!mounted) return;
     setState(() => _isLoading = false);

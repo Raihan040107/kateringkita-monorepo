@@ -3,8 +3,8 @@ import 'package:provider/provider.dart';
 import '../../core/app_colors.dart';
 import '../../core/app_routes.dart';
 import '../../core/app_text_styles.dart';
-import '../../data/app_database.dart';
-import '../../data/auth_repository.dart';
+import '../../services/api_client.dart';
+import '../../services/auth_api.dart';
 import '../../widgets/custom_text_field.dart';
 import '../../widgets/primary_button.dart';
 
@@ -24,6 +24,8 @@ class _SignUpScreenState extends State<SignUpScreen> {
   bool _agreeToTerms = false;
   bool _obscurePassword = true;
   bool _loading = false;
+  // Galat per kolom dari server (400 VALIDATION_ERROR)
+  String? _errName, _errEmail, _errPhone, _errPassword;
 
   @override
   void dispose() {
@@ -48,30 +50,32 @@ class _SignUpScreenState extends State<SignUpScreen> {
       _showMessage('Semua field wajib diisi.');
       return;
     }
-    if (!RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(email)) {
-      _showMessage('Format email tidak valid.');
-      return;
-    }
-    if (password.length < 6) {
-      _showMessage('Password minimal 6 karakter.');
-      return;
-    }
 
-    setState(() => _loading = true);
-    final repo = AuthRepository(context.read<AppDb>());
-    final error = await repo.register(
-      fullName: name,
-      email: email,
-      phone: phone,
-      password: password,
-    );
+    setState(() {
+      _loading = true;
+      _errName = _errEmail = _errPhone = _errPassword = null;
+    });
+    try {
+      await context.read<ApiClient>().register(
+            fullName: name,
+            email: email,
+            phone: phone,
+            password: password,
+          );
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _errName = e.field('full_name');
+        _errEmail = e.field('email');
+        _errPhone = e.field('phone');
+        _errPassword = e.field('password');
+      });
+      if (e.fields.isEmpty) _showMessage(e.message);
+      return;
+    }
     if (!mounted) return;
     setState(() => _loading = false);
-
-    if (error != null) {
-      _showMessage(error);
-      return;
-    }
     _showMessage('Akun berhasil dibuat! Silakan login.');
     // Ke halaman Login (bukan dashboard), email langsung terisi.
     Navigator.pushNamedAndRemoveUntil(
@@ -107,6 +111,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
                 label: 'Full Name',
                 hint: 'Masukkan nama lengkap',
                 controller: _nameController,
+                errorText: _errName,
               ),
               const SizedBox(height: 16),
               // Email Field
@@ -115,22 +120,25 @@ class _SignUpScreenState extends State<SignUpScreen> {
                 hint: 'Masukkan email student UB',
                 controller: _emailController,
                 keyboardType: TextInputType.emailAddress,
+                errorText: _errEmail,
               ),
               const SizedBox(height: 16),
               // Phone Field
               CustomTextField(
                 label: 'Phone Number',
-                hint: '08xx-xxxx-xxxx',
+                hint: '08xxxxxxxxxx (10–13 digit)',
                 controller: _phoneController,
                 keyboardType: TextInputType.phone,
+                errorText: _errPhone,
               ),
               const SizedBox(height: 16),
               // Password Field
               CustomTextField(
                 label: 'Password',
-                hint: 'Buat kata sandi aman',
+                hint: 'Minimal 8 karakter, huruf dan angka',
                 controller: _passwordController,
                 obscureText: _obscurePassword,
+                errorText: _errPassword,
                 suffixIcon: IconButton(
                   icon: Icon(
                     _obscurePassword ? Icons.visibility_off_outlined : Icons.visibility_outlined,

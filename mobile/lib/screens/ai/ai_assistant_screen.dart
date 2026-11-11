@@ -3,10 +3,9 @@ import 'package:provider/provider.dart';
 
 import '../../core/app_colors.dart';
 import '../../core/app_routes.dart';
-import '../../data/app_database.dart';
-import '../../data/auth_repository.dart';
 import '../../models/ai_recommendation_model.dart';
 import '../../models/product_model.dart';
+import '../../providers/session_provider.dart';
 import '../../services/gemini_service.dart';
 
 class _ProductCategoryOption {
@@ -124,8 +123,7 @@ class _AIAssistantScreenState extends State<AIAssistantScreen> {
   }
 
   Future<void> _loadUserName() async {
-    final user = await AuthRepository(context.read<AppDb>()).currentUser();
-    if (!mounted) return;
+    final user = context.read<SessionProvider>().user;
     if (user != null && user.fullName.isNotEmpty) {
       setState(() {
         _userName = user.fullName.split(' ').first;

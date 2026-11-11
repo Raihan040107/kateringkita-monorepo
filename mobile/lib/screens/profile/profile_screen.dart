@@ -9,9 +9,12 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../core/app_colors.dart';
 import '../../core/app_routes.dart';
 import '../../core/app_text_styles.dart';
-import '../../data/app_database.dart';
-import '../../data/auth_repository.dart';
+import '../../models/user.dart';
+import '../../providers/session_provider.dart';
 import '../../providers/theme_provider.dart';
+import '../../services/api_client.dart';
+import '../../services/auth_api.dart';
+import '../../services/meta_api.dart';
 import '../../widgets/app_modal_dialog.dart';
 import 'edit_profile_screen.dart';
 
@@ -25,7 +28,7 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen> {
   static final SharedPreferencesAsync _prefs = SharedPreferencesAsync();
 
-  User? _user;
+  PublicUser? _user;
   UserProfileExtras _extras = const UserProfileExtras();
 
   // Pengaturan Preferensi & Notifikasi
@@ -45,10 +48,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _loadUserAndPreferences() async {
-    final db = context.read<AppDb>();
-    final user = await AuthRepository(db).currentUser();
-    final email = user?.email ?? 'abdurrahim.workspace@gmail.com';
-    final extras = await UserProfileExtras.load(email);
+    final user = context.read<SessionProvider>().user;
+    // preferensi lokal (bio, avatar) diikat ke akun
+    final extras = await UserProfileExtras.load(user?.email ?? user?.phone ?? '');
 
     final lang = await _prefs.getString('app_pref_lang') ?? 'Indonesia';
     final bioAuth = await _prefs.getBool('app_pref_biometric') ?? true;
@@ -110,7 +112,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _openCustomerSupportWhatsApp() async {
-    const phone = '6285852157352';
+    // Nomor CS diatur admin (GET /meta/settings.cs_whatsapp, format 08…)
+    String? cs;
+    try {
+      cs = (await context.read<ApiClient>().settings()).csWhatsapp;
+    } catch (_) {}
+    if (cs == null) {
+      _showToast('Kontak CS belum tersedia.');
+      return;
+    }
+    final phone = '62${cs.substring(1)}';
     const message =
         'Halo Admin Customer Service KateringKita! 👋\nSaya butuh bantuan terkait pesanan / layanan katering.';
     final whatsappUrl =
@@ -122,14 +133,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
         mode: LaunchMode.externalApplication,
       );
       if (!launched) {
-        await Clipboard.setData(const ClipboardData(text: '085852157352'));
-        _showToast(
-            'Nomor WhatsApp CS (0858-5215-7352) berhasil disalin ke clipboard!');
+        await Clipboard.setData(ClipboardData(text: cs));
+        _showToast('Nomor WhatsApp CS ($cs) berhasil disalin ke clipboard!');
       }
     } catch (_) {
-      await Clipboard.setData(const ClipboardData(text: '085852157352'));
-      _showToast(
-          'Nomor WhatsApp CS (0858-5215-7352) berhasil disalin ke clipboard!');
+      await Clipboard.setData(ClipboardData(text: cs));
+      _showToast('Nomor WhatsApp CS ($cs) berhasil disalin ke clipboard!');
     }
   }
 
@@ -313,10 +322,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         final nw = newPwdCtrl.text.trim();
                         final cf = confirmPwdCtrl.text.trim();
 
-                        if (nw.length < 6) {
+                        if (nw.length < 8) {
                           setSheetState(() {
                             errorMsg =
-                                'Password baru minimal harus 6 karakter.';
+                                'Kata sandi baru minimal 8 karakter, huruf dan angka.';
                           });
                           return;
                         }
@@ -327,16 +336,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           return;
                         }
 
-                        final email =
-                            _user?.email ?? 'abdurrahim.workspace@gmail.com';
-                        final repo = AuthRepository(context.read<AppDb>());
-                        final err = await repo.changePassword(
-                          email: email,
-                          currentPassword: cur,
-                          newPassword: nw,
-                        );
-                        if (err != null) {
-                          setSheetState(() => errorMsg = err);
+                        try {
+                          await context
+                              .read<ApiClient>()
+                              .changePassword(cur, nw);
+                        } on ApiException catch (e) {
+                          setSheetState(() => errorMsg =
+                              e.field('current_password') ??
+                                  e.field('new_password') ??
+                                  e.message);
                           return;
                         }
 
@@ -1229,8 +1237,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       context,
                       onConfirm: () async {
                         final nav = Navigator.of(context);
-                        final repo = AuthRepository(context.read<AppDb>());
-                        await repo.logout();
+                        await context.read<SessionProvider>().logout();
                         nav.pushNamedAndRemoveUntil(
                           AppRoutes.login,
                           (route) => false,

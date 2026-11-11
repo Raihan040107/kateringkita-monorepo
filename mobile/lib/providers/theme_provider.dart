@@ -5,7 +5,8 @@ import '../core/app_colors.dart';
 
 class ThemeProvider extends ChangeNotifier {
   static const String prefKey = 'app_pref_dark';
-  final SharedPreferencesAsync _prefs = SharedPreferencesAsync();
+  // lazy: plugin belum ada saat widget test
+  late final SharedPreferencesAsync _prefs = SharedPreferencesAsync();
 
   bool _isDarkMode;
   bool get isDarkMode => _isDarkMode;

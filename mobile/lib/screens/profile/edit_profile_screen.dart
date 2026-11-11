@@ -8,9 +8,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/app_colors.dart';
 import '../../core/app_text_styles.dart';
-import '../../data/app_database.dart';
-import '../../data/auth_repository.dart';
+import '../../models/user.dart';
+import '../../providers/session_provider.dart';
 import '../../providers/theme_provider.dart';
+import '../../services/api_client.dart';
+import '../../services/auth_api.dart';
 
 /// Data tambahan profil pengguna yang disimpan di SharedPreferences
 class UserProfileExtras {
@@ -95,7 +97,7 @@ class UserProfileExtras {
 
 /// Halaman "Ubah Profil" (Kelola Profil) bergaya Shopee dengan tema KateringKita
 class EditProfileScreen extends StatefulWidget {
-  final User? initialUser;
+  final PublicUser? initialUser;
   final UserProfileExtras initialExtras;
 
   const EditProfileScreen({
@@ -148,17 +150,17 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     return '$first************$last@$domain';
   }
 
-  Future<void> _persistChanges({String? oldEmail}) async {
-    final db = context.read<AppDb>();
-    final repo = AuthRepository(db);
-    if (_userId != null) {
-      await repo.updateProfile(
-        userId: _userId!,
-        oldEmail: oldEmail ?? _email,
-        fullName: _name,
-        phone: _phone,
-        newEmail: _email,
-      );
+  /// Nama disimpan ke server (`PATCH /me`); bio, gender, tanggal lahir, dan
+  /// avatar masih lokal. Email/HP butuh sandi saat ini — menyusul.
+  Future<void> _persistChanges() async {
+    if (_userId != null && _name != widget.initialUser?.fullName) {
+      try {
+        final user =
+            await context.read<ApiClient>().updateMe({'full_name': _name});
+        if (mounted) context.read<SessionProvider>().setUser(user);
+      } on ApiException catch (e) {
+        _showSuccessToast(e.field('full_name') ?? e.message);
+      }
     }
     await UserProfileExtras.save(_email, _extras);
   }
@@ -772,29 +774,13 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                             ),
                           ),
                           onPressed: () async {
-                            final newVal = valueCtrl.text.trim();
-                            if (newVal.isEmpty) return;
-                            final prevEmail = _email;
-
-                            setState(() {
-                              if (isPhone) {
-                                _phone = newVal;
-                                _extras = _extras.copyWith(
-                                  isPhoneVerified: true,
-                                );
-                              } else {
-                                _email = newVal;
-                                _extras = _extras.copyWith(
-                                  isEmailVerified: true,
-                                );
-                              }
-                            });
+                            // Ubah email/HP di server butuh kata sandi saat ini
+                            // (PATCH /me current_password); alurnya menyusul.
                             Navigator.pop(ctx);
-                            await _persistChanges(oldEmail: prevEmail);
                             _showSuccessToast(
                               isPhone
-                                  ? 'Nomor WhatsApp berhasil disimpan & diverifikasi!'
-                                  : 'Alamat Email berhasil disimpan & diverifikasi!',
+                                  ? 'Ubah nomor WhatsApp akan tersedia segera.'
+                                  : 'Ubah alamat email akan tersedia segera.',
                             );
                           },
                           child: Text(

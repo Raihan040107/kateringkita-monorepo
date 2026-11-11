@@ -5,9 +5,8 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
 
-import '../../data/app_database.dart';
-import '../../data/auth_repository.dart';
 import '../../data/settings_store.dart';
+import '../../providers/session_provider.dart';
 import '../../core/app_colors.dart';
 import '../../core/app_currency.dart';
 import '../../core/app_routes.dart';
@@ -112,8 +111,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   }
 
   Future<void> _loadUserData() async {
-    final repo = AuthRepository(context.read<AppDb>());
-    final user = await repo.currentUser();
+    final user = context.read<SessionProvider>().user;
     final meeting = await SettingsStore.loadMeetingPoint();
     final savedAddress = await SettingsStore.loadMeetingAddress();
     final (lat, lng) = await SettingsStore.loadMeetingCoordinates();

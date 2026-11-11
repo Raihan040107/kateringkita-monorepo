@@ -3,8 +3,9 @@ import 'package:provider/provider.dart';
 import '../../core/app_colors.dart';
 import '../../core/app_routes.dart';
 import '../../core/app_text_styles.dart';
-import '../../data/app_database.dart';
-import '../../data/auth_repository.dart';
+import '../../providers/session_provider.dart';
+import '../../services/api_client.dart';
+import '../../services/auth_api.dart';
 import '../../widgets/app_modal_dialog.dart';
 import '../../widgets/custom_text_field.dart';
 import '../../widgets/primary_button.dart';
@@ -42,25 +43,29 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _onLogin() async {
-    final email = _emailController.text.trim();
+    final identifier = _emailController.text.trim();
     final password = _passwordController.text;
-    if (email.isEmpty || password.isEmpty) {
+    if (identifier.isEmpty || password.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Email dan password wajib diisi.')),
+        const SnackBar(content: Text('Email/No. HP dan kata sandi wajib diisi.')),
       );
       return;
     }
 
     setState(() => _loading = true);
-    final repo = AuthRepository(context.read<AppDb>());
-    final error = await repo.login(email: email, password: password);
-    if (!mounted) return;
-    setState(() => _loading = false);
-
-    if (error != null) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error)));
+    try {
+      final (token, user) =
+          await context.read<ApiClient>().login(identifier, password);
+      if (!mounted) return;
+      await context.read<SessionProvider>().signIn(token, user);
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
       return;
     }
+    if (!mounted) return;
+    setState(() => _loading = false);
     AppModalDialog.showLoginSuccess(
       context,
       onConfirm: () {
@@ -97,8 +102,8 @@ class _LoginScreenState extends State<LoginScreen> {
                       const SizedBox(height: 32),
                       // Email Field
                       CustomTextField(
-                        label: 'Email Address',
-                        hint: 'Masukkan email kampus',
+                        label: 'Email / No. HP',
+                        hint: 'Email atau nomor HP terdaftar',
                         controller: _emailController,
                         keyboardType: TextInputType.emailAddress,
                       ),
@@ -128,22 +133,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         text: _loading ? 'Memeriksa...' : 'Login',
                         onPressed: _loading ? null : _onLogin,
                       ),
-                      const SizedBox(height: 16),
-                      // Forgot Password link
-                      Center(
-                        child: TextButton(
-                          onPressed: () {
-                            Navigator.pushNamed(context, AppRoutes.forgotPassword);
-                          },
-                          child: Text(
-                            'Forgot Password?',
-                            style: AppTextStyles.bodyMedium.copyWith(
-                              color: AppColors.blue,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                      ),
+                      // Lupa sandi (OTP email) menyusul setelah SMTP production siap.
                       const Spacer(),
                       const SizedBox(height: 16),
                       // Create New Account link
