@@ -1,0 +1,9 @@
+# hasil tangkapan layar (dibuat ulang oleh tools/capture.mjs)
+capture/
+# skrip dan keluaran query figcraft-cli yang dibuat ulang oleh tools/build-*.mjs
+tools/*.json
+!tools/lucide-paths.json
+tools/*.out
+tools/*.err
+# cadangan file desain
+*.sebelum-*.figcraft

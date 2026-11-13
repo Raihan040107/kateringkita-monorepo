@@ -141,7 +141,7 @@ class AppModalDialog extends StatelessWidget {
       type: AppModalType.success,
       title: 'Anda Berhasil Login!',
       message: message ??
-          'Kata sandi baru Anda telah disimpan. Silakan login kembali dengan kata sandi baru Anda.',
+          'Selamat datang kembali! Yuk, pesan katering favoritmu.',
       primaryButtonText: 'Ke Beranda',
       onPrimaryPressed: () {
         Navigator.pop(context);
